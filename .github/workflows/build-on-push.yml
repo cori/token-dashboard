@@ -1,0 +1,155 @@
+name: Build on Push
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      short_sha: ${{ steps.version.outputs.short_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get version
+        id: version
+        run: |
+          SHORT_SHA=$(git rev-parse --short=7 HEAD)
+          VERSION=$(git describe --tags --always)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION"
+          echo "Short SHA: $SHORT_SHA"
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/cori/token-dashboard
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix=sha-
+            type=raw,value=${{ steps.version.outputs.version }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run tests
+        run: pytest -v
+
+  update-appstore:
+    needs: [build, test]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: cori/rtappstore
+          token: ${{ secrets.RTAPPSTORE_PAT }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Update token-dashboard version
+        id: version
+        env:
+          VERSION: ${{ needs.build.outputs.short_sha }}
+        run: |
+          echo "Version: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          # Update config.json
+          jq --arg version "sha-$VERSION" \
+             --argjson tipi_version "$(jq '.tipi_version + 1' apps/token-dashboard/config.json)" \
+             --arg updated_at "$(date +%s)000" \
+             '.version = $version | .tipi_version = $tipi_version | .updated_at = ($updated_at | tonumber)' \
+             apps/token-dashboard/config.json > apps/token-dashboard/config.json.tmp && \
+          mv apps/token-dashboard/config.json.tmp apps/token-dashboard/config.json
+
+          # Update docker-compose.json to use sha-<short> tag
+          jq --arg version "sha-$VERSION" \
+             '.services[0].image = "ghcr.io/cori/token-dashboard:" + $version' \
+             apps/token-dashboard/docker-compose.json > apps/token-dashboard/docker-compose.json.tmp && \
+          mv apps/token-dashboard/docker-compose.json.tmp apps/token-dashboard/docker-compose.json
+
+          echo "tipi_version=$(jq -r '.tipi_version' apps/token-dashboard/config.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Validate with bun test
+        run: |
+          bun install
+          bun test
+
+      - name: Create PR
+        env:
+          GH_TOKEN: ${{ secrets.RTAPPSTORE_PAT }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          BRANCH="update-token-dashboard-${{ steps.version.outputs.version }}-${SHORT_SHA}"
+          git checkout -b "$BRANCH"
+
+          git add apps/token-dashboard/config.json apps/token-dashboard/docker-compose.json
+          git commit -m "app: update token-dashboard to ${{ steps.version.outputs.version }} (auto from push)"
+
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --repo cori/rtappstore \
+            --base main \
+            --head "$BRANCH" \
+            --title "app: update token-dashboard to ${{ steps.version.outputs.version }} (auto)" \
+            --body "Automated update from token-dashboard push to main.
+
+            - Version: ${{ steps.version.outputs.version }}
+            - tipi_version: ${{ steps.version.outputs.tipi_version }}
+            - Image: ghcr.io/cori/token-dashboard:sha-${{ steps.version.outputs.version }}
+
+            All validation tests pass."

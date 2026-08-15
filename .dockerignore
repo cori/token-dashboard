@@ -1,0 +1,10 @@
+# Don't ship tests or dev configs in the image
+tests/
+.github/
+.git/
+.gitignore
+.dockerignore
+*.md.bak
+.pytest_cache/
+__pycache__/
+*.egg-info/

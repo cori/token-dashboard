@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "token-dashboard"
+version = "0.1.0"
+description = "Self-hosted dashboard for Hermes token-usage analytics. Reads token_calls.db, renders HTML, serves via HTTP."
+requires-python = ">=3.10"
+authors = [
+    {name = "cori"},
+]
+
+# Stdlib only. PyYAML is used by the legacy code that was vendored in;
+# everything else is stdlib.
+dependencies = [
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.setuptools]
+packages = ["dashboard"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
