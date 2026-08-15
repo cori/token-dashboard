@@ -19,12 +19,13 @@ from dashboard.regenerator import regenerate
 
 def test_regenerate_writes_html_file(tmp_path: Path):
     """regenerate() should create a non-empty index.html at output_path."""
-    from tests.conftest import make_fixture_db
+    from tests.conftest import make_fixture_db, make_fixture_rate_table
 
     db = make_fixture_db(tmp_path / "token_calls.db")
+    rt = make_fixture_rate_table(tmp_path / "rate_table.yaml")
     out = tmp_path / "index.html"
 
-    regenerate(db, out)
+    regenerate(db, out, rate_table_path=rt)
 
     assert out.exists(), "regenerate did not write output_path"
     assert out.stat().st_size > 1000, "output is suspiciously small"
@@ -32,12 +33,13 @@ def test_regenerate_writes_html_file(tmp_path: Path):
 
 def test_regenerate_output_contains_summary_card(tmp_path: Path):
     """Output should contain the summary card JS template."""
-    from tests.conftest import make_fixture_db
+    from tests.conftest import make_fixture_db, make_fixture_rate_table
 
     db = make_fixture_db(tmp_path / "token_calls.db")
+    rt = make_fixture_rate_table(tmp_path / "rate_table.yaml")
     out = tmp_path / "index.html"
 
-    regenerate(db, out)
+    regenerate(db, out, rate_table_path=rt)
     html = out.read_text()
 
     # The summary-card render uses these keys. Any version with these
@@ -48,12 +50,13 @@ def test_regenerate_output_contains_summary_card(tmp_path: Path):
 
 def test_regenerate_output_contains_breakdown_table(tmp_path: Path):
     """Output should contain the per-(provider, model) breakdown."""
-    from tests.conftest import make_fixture_db
+    from tests.conftest import make_fixture_db, make_fixture_rate_table
 
     db = make_fixture_db(tmp_path / "token_calls.db")
+    rt = make_fixture_rate_table(tmp_path / "rate_table.yaml")
     out = tmp_path / "index.html"
 
-    regenerate(db, out)
+    regenerate(db, out, rate_table_path=rt)
     html = out.read_text()
 
     # Each provider we put in the fixture must appear at least once
@@ -64,12 +67,13 @@ def test_regenerate_output_contains_breakdown_table(tmp_path: Path):
 def test_regenerate_output_contains_picker_watch_panel(tmp_path: Path):
     """Output should include the model-picker-watch panel (regression
     test: dashboard.wire-in is part of the contract)."""
-    from tests.conftest import make_fixture_db
+    from tests.conftest import make_fixture_db, make_fixture_rate_table
 
     db = make_fixture_db(tmp_path / "token_calls.db")
+    rt = make_fixture_rate_table(tmp_path / "rate_table.yaml")
     out = tmp_path / "index.html"
 
-    regenerate(db, out)
+    regenerate(db, out, rate_table_path=rt)
     html = out.read_text()
 
     assert "picker-watch-section" in html, "missing picker-watch panel"
@@ -79,11 +83,14 @@ def test_regenerate_output_contains_picker_watch_panel(tmp_path: Path):
 def test_regenerate_missing_db_raises(tmp_path: Path):
     """regenerate() with a missing db should raise (not silently write
     an empty dashboard)."""
+    from tests.conftest import make_fixture_rate_table
+
+    rt = make_fixture_rate_table(tmp_path / "rate_table.yaml")
     missing_db = tmp_path / "does-not-exist.db"
     out = tmp_path / "index.html"
 
     with pytest.raises(Exception):
-        regenerate(missing_db, out)
+        regenerate(missing_db, out, rate_table_path=rt)
 
 
 def test_regenerate_is_deterministic_for_same_input(tmp_path: Path):
@@ -91,14 +98,15 @@ def test_regenerate_is_deterministic_for_same_input(tmp_path: Path):
 
     Important so a /health probe can cache-hash and detect stale output.
     """
-    from tests.conftest import make_fixture_db
+    from tests.conftest import make_fixture_db, make_fixture_rate_table
 
     db = make_fixture_db(tmp_path / "token_calls.db")
+    rt = make_fixture_rate_table(tmp_path / "rate_table.yaml")
     out_a = tmp_path / "a.html"
     out_b = tmp_path / "b.html"
 
-    regenerate(db, out_a)
-    regenerate(db, out_b)
+    regenerate(db, out_a, rate_table_path=rt)
+    regenerate(db, out_b, rate_table_path=rt)
 
     # Both should have the same non-timestamp content. We compare
     # everything except the __TIMESTAMP__ line which legitimately varies.
